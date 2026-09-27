@@ -3,9 +3,10 @@
 # llama-preset-base — Qwen preset installer for llama.cpp
 #
 # What it does:
-#   1. Checks for the presence of llama.cpp CLI (llama-cli / llama-server).
-#      If not found — clones and builds llama.cpp from
-#      https://github.com/ggml-org/llama.cpp and installs binaries to PATH.
+#   1. Checks that llama.cpp CLI (llama-server) is present in PATH.
+#      If it is NOT found, this script does NOT build anything: it prints the
+#      link to the upstream repository and recommends following the official
+#      build instructions for your hardware (CUDA, Vulkan, ROCm, SYCL, Metal...).
 #   2. Creates a launcher at ~/.local/bin/llama-qwen
 #      (launches llama-server in router mode with the Qwen model preset).
 #   3. Creates the model preset at ~/.config/llama.cpp/models.ini
@@ -23,17 +24,15 @@
 set -euo pipefail
 
 # ------------------------------ defaults ------------------------------------
-readonly LLAMA_CPP_REPO="https://github.com/ggml-org/llama.cpp.git"
 readonly SCRIPT_NAME="llama-preset-base"
+readonly LLAMA_CPP_REPO_URL="https://github.com/ggml-org/llama.cpp"
+readonly LLAMA_CPP_BUILD_DOC_URL="https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md"
 
 PORT=9199
 API_KEY=""                       # empty => will generate a random key
 FORCE=0                          # 1 = overwrite existing files without backup
 SKIP_FILES=0                     # 1 = skip creating launcher and preset
-SKIP_LLCPP=0                     # 1 = skip llama.cpp check/installation
-AUTO_DEPS=1                      # 1 = auto-install build dependencies
-CUDA_MODE="auto"                 # auto | on | off
-BUILD_DIR="${HOME}/.cache/llama-preset-base/llama.cpp"
+SKIP_LLCPP=0                     # 1 = skip the llama.cpp presence check
 LLAMA_QWEN_DEST="${HOME}/.local/bin/llama-qwen"
 MODELS_INI_DEST="${HOME}/.config/llama.cpp/models.ini"
 LLAMA_SERVER_BIN=""
@@ -62,17 +61,16 @@ With options:
 
 Options:
   -p, --port PORT        server port (default: 9199)
-      --api-key KEY      API key for the server (default: randomly generated)
+      --api-key KEY      API key for the server (default: randomly generated, "sk-..." format)
   -f, --force            overwrite existing files without backup
       --skip-files       skip creating launcher and preset
-      --skip-llama-cpp   skip checking/building llama.cpp
-      --no-auto-deps     don't auto-install build dependencies
-      --cuda             force CUDA backend during build (default: auto-detect)
-      --no-cuda          force CPU-only build
-      --build-dir DIR    where to clone llama.cpp (default: ~/.cache/llama-preset-base/llama.cpp)
+      --skip-llama-cpp   skip checking for llama.cpp in PATH
       --launcher PATH    where to write the launcher (default: ~/.local/bin/llama-qwen)
       --preset PATH      where to write the preset (default: ~/.config/llama.cpp/models.ini)
   -h, --help             this help message
+
+Note: this installer does NOT build llama.cpp. If llama-server is missing,
+install it yourself following https://github.com/ggml-org/llama.cpp
 USAGE
 }
 
@@ -82,12 +80,8 @@ parse_args() {
       -f|--force)          FORCE=1 ;;
       --skip-files)        SKIP_FILES=1 ;;
       --skip-llama-cpp)    SKIP_LLCPP=1 ;;
-      --no-auto-deps)      AUTO_DEPS=0 ;;
-      --cuda)              CUDA_MODE="on" ;;
-      --no-cuda)           CUDA_MODE="off" ;;
       --api-key)           (( $# >= 2 )) || die "--api-key requires a value"; API_KEY="$2"; shift ;;
       -p|--port)           (( $# >= 2 )) || die "--port requires a value"; PORT="$2"; shift ;;
-      --build-dir)         (( $# >= 2 )) || die "--build-dir requires a value"; BUILD_DIR="$2"; shift ;;
       --launcher)          (( $# >= 2 )) || die "--launcher requires a value"; LLAMA_QWEN_DEST="$2"; shift ;;
       --preset)            (( $# >= 2 )) || die "--preset requires a value"; MODELS_INI_DEST="$2"; shift ;;
       -h|--help)           usage; exit 0 ;;
@@ -98,177 +92,68 @@ parse_args() {
   [[ "$PORT" =~ ^[0-9]+$ ]] && (( PORT > 0 && PORT < 65536 )) || die "invalid port: $PORT"
 }
 
-# ------------------------------ build dependencies ---------------------------
-detect_pkg_mgr() {
-  if   have apt-get; then echo apt
-  elif have dnf;     then echo dnf
-  elif have pacman;  then echo pacman
-  elif have zypper;  then echo zypper
-  elif have apk;     then echo apk
-  else echo ""
-  fi
-}
+# ------------------------------ llama.cpp check ------------------------------
+print_llama_cpp_hint() {
+  warn "llama.cpp (llama-server) was not found in PATH."
+  cat >&2 <<HINT
 
-ensure_build_deps() {
-  local cc="" c
-  for c in g++ clang++ c++ cc; do
-    if have "$c"; then cc="$c"; break; fi
-  done
+  This installer does NOT compile or install llama.cpp for you.
+  Install it manually — the official sources of truth are:
 
-  if have git && have cmake && [[ -n "$cc" ]]; then
-    info "build dependencies are already present (compiler: $cc)"
-    return 0
-  fi
+    repository : ${LLAMA_CPP_REPO_URL}
+    build docs : ${LLAMA_CPP_BUILD_DOC_URL}
 
-  local missing=()
-  if ! have git;   then missing+=("git"); fi
-  if ! have cmake; then missing+=("cmake"); fi
-  if [[ -z "$cc" ]]; then missing+=("g++/clang++"); fi
+  Follow the build instructions from the repository and pick the backend that
+  matches YOUR hardware, for example:
 
-  warn "missing build dependencies: ${missing[*]}"
-  if (( ! AUTO_DEPS )); then
-    die "install them manually and re-run:
-  apt:    sudo apt install build-essential cmake git
-  dnf:    sudo dnf install gcc-c++ glibc-devel make cmake git
-  pacman: sudo pacman -S base-devel cmake git
-  zypper: sudo zypper install gcc-c++ cmake make git
-  apk:    sudo apk add build-base cmake git"
-  fi
+    NVIDIA GPU (CUDA)    : cmake -B build -DGGML_CUDA=ON
+    AMD GPU (ROCm/HIP)   : cmake -B build -DGGML_HIP=ON
+    Any GPU (Vulkan)     : cmake -B build -DGGML_VULKAN=ON
+    Intel GPU (SYCL)     : cmake -B build -DGGML_SYCL=ON
+    Apple Silicon (Metal): cmake -B build -DGGML_METAL=ON   # enabled by default on macOS
+    CPU only             : cmake -B build
 
-  local mgr
-  mgr="$(detect_pkg_mgr)"
-  [[ -n "$mgr" ]] || die "no supported package manager (apt/dnf/pacman/zypper/apk) found"
+  Then build and install the binaries:
 
-  info "installing build dependencies via $mgr: ${missing[*]}"
-  local sudo=""
-  if [[ ${EUID} -ne 0 ]]; then
-    if have sudo; then sudo="sudo"
-    else die "root privileges or sudo required to install dependencies"; fi
-  fi
-  case "$mgr" in
-    apt)    $sudo apt-get update -y && $sudo apt-get install -y build-essential cmake git ;;
-    dnf)    $sudo dnf install -y gcc-c++ glibc-devel make cmake git ;;
-    pacman) $sudo pacman -Sy --noconfirm base-devel cmake git ;;
-    zypper) $sudo zypper --non-interactive install gcc-c++ cmake make git ;;
-    apk)    $sudo apk add --no-cache build-base cmake git ;;
-  esac
+    cmake --build build --config Release -j "\$(nproc)"
+    # put build/bin/llama-server (and llama-cli) in your PATH, e.g.:
+    install -m 0755 build/bin/llama-server ~/.local/bin/
 
-  # re-check
-  if ! have git || ! have cmake; then
-    die "dependency installation failed — please install manually (git, cmake, C++ compiler)"
-  fi
-}
+  After llama.cpp is in PATH, just run: llama-qwen
 
-# ----------------------------------- build llama.cpp -------------------------
-build_llama_cpp() {
-  info "llama.cpp not found — building from source: $LLAMA_CPP_REPO"
-  ensure_build_deps
-
-  mkdir -p "$(dirname "$BUILD_DIR")"
-  if [[ -d "$BUILD_DIR/.git" ]]; then
-    info "updating existing clone: $BUILD_DIR"
-    git -C "$BUILD_DIR" fetch --depth 1 origin
-    git -C "$BUILD_DIR" reset --hard origin/HEAD
-  else
-    rm -rf "$BUILD_DIR"
-    git clone --depth 1 "$LLAMA_CPP_REPO" "$BUILD_DIR"
-  fi
-
-  # --- detect CUDA backend ---
-  local mode="$CUDA_MODE"
-  if [[ "$mode" == "auto" ]]; then
-    if have nvidia-smi || have nvcc || [[ -e /dev/nvidia0 ]]; then
-      mode="on"
-    else
-      mode="off"
-    fi
-  fi
-
-  local cfg=(-DCMAKE_BUILD_TYPE=Release)
-  if [[ "$mode" == "on" ]]; then
-    if have nvcc || [[ -d /usr/local/cuda ]]; then
-      cfg+=(-DGGML_CUDA=ON)
-      info "CUDA backend: enabled"
-    else
-      warn "CUDA requested but no CUDA toolkit (nvcc) found — building without CUDA"
-    fi
-  fi
-
-  info "configuring (cmake)..."
-  cmake -S "$BUILD_DIR" -B "$BUILD_DIR/build" "${cfg[@]}"
-
-  local jobs
-  jobs="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
-  info "compiling (jobs=$jobs, this may take a few minutes)..."
-  cmake --build "$BUILD_DIR/build" --config Release -j "$jobs"
-
-  local bin src
-  for bin in llama-cli llama-server; do
-    src="$BUILD_DIR/build/bin/$bin"
-    if [[ ! -x "$src" ]]; then
-      die "expected binary not found after build: $src"
-    fi
-  done
-
-  # --- install binaries ---
-  local dest_dir
-  if [[ ${EUID} -eq 0 && -d /usr/local/bin ]]; then
-    dest_dir="/usr/local/bin"
-  elif [[ -w /usr/local/bin ]]; then
-    dest_dir="/usr/local/bin"
-  else
-    dest_dir="${HOME}/.local/bin"
-    mkdir -p "$dest_dir"
-  fi
-
-  for bin in llama-cli llama-server; do
-    install -m 0755 "$BUILD_DIR/build/bin/$bin" "$dest_dir/$bin"
-    info "installed: $dest_dir/$bin"
-  done
-
-  case ":$PATH:" in
-    *":$dest_dir:"*) ;;
-    *) warn "$dest_dir is not in PATH. Add it to ~/.bashrc:
-  export PATH=\"$dest_dir:\$PATH\"" ;;
-  esac
+HINT
 }
 
 ensure_llama_cpp() {
-  local need_build=0
   if have llama-server; then
     if llama-server --version >/dev/null 2>&1; then
       LLAMA_SERVER_BIN="$(command -v llama-server)"
       info "llama.cpp found: $LLAMA_SERVER_BIN"
       llama-server --version | head -1 | sed 's/^/     /'
       if ! have llama-cli; then
-        warn "llama-cli not found in PATH (optional; preset only needs llama-server)"
+        warn "llama-cli not found in PATH (optional; the preset only needs llama-server)"
       fi
-    else
-      warn "llama-server found but doesn't run — rebuilding"
-      need_build=1
+      return 0
     fi
-  elif have llama-cli; then
-    warn "llama-cli found, but llama-server is missing — building llama.cpp"
-    need_build=1
-  else
-    info "llama-cli / llama-server not found in PATH"
-    need_build=1
+    warn "llama-server found at $(command -v llama-server) but it failed to run"
   fi
 
-  if (( need_build )); then
-    build_llama_cpp
-    have llama-server || die "llama-server still not found in PATH (check your PATH)"
-    LLAMA_SERVER_BIN="$(command -v llama-server)"
-  fi
+  LLAMA_SERVER_BIN=""
+  print_llama_cpp_hint
 }
 
 # ---------------------------------- API key ----------------------------------
 generate_api_key() {
+  # Common practice for LLM API keys: a short provider prefix ("sk-")
+  # followed by ~48 random alphanumeric characters (OpenAI/OpenRouter style).
+  local raw
   if have openssl; then
-    openssl rand -base64 16 | tr -d '\n'
+    raw="$(openssl rand -base64 48 | tr -d '\n=' | tr '/+' 'AZ')"
   else
-    od -An -v -tx1 -N16 /dev/urandom | tr -d ' \n'
+    raw="$(od -An -v -tx1 -N48 /dev/urandom | tr -d ' \n')"
   fi
+  raw="${raw//[^A-Za-z0-9]/}"
+  printf 'sk-%s\n' "${raw:0:48}"
 }
 
 # ---------------------------------- backups ----------------------------------
@@ -318,6 +203,9 @@ LAUNCHER_EOF
 }
 
 write_models_ini() {
+  # `hf` is the preset alias of `--hf-repo` / `-hf` and takes a full Hugging
+  # Face reference "<user>/<model>[:QUANT]" (quant is case-insensitive).
+  # See: https://github.com/ggml-org/llama.cpp/blob/master/docs/preset.md
   cat > "$MODELS_INI_DEST" <<'MODELS_EOF'
 [*]
 ctx-size = 16384
@@ -327,8 +215,7 @@ flash-attn = on
 n-gpu-layers = -1
 
 [unsloth/Qwen3.8-27B-MTP-GGUF-64K]
-hf-repo = unsloth/Qwen3.8-27B-GGUF
-hf-file = Qwen3.8-27B-UD-Q4_K_XL.gguf
+hf = unsloth/Qwen3.8-27B-GGUF:Q4_K_XL
 ctx-size = 65536
 spec-type = draft-mtp
 spec-draft-n-max = 4
@@ -340,8 +227,7 @@ presence-penalty = 0.0
 repeat-penalty = 1.0
 
 [unsloth/Qwen3.8-27B-MTP-GGUF-64K-noreasoning]
-hf-repo = unsloth/Qwen3.8-27B-GGUF
-hf-file = Qwen3.8-27B-UD-Q4_K_XL.gguf
+hf = unsloth/Qwen3.8-27B-GGUF:Q4_K_XL
 ctx-size = 65536
 spec-type = draft-mtp
 spec-draft-n-max = 4
@@ -354,8 +240,7 @@ presence-penalty = 1.5
 repeat-penalty = 1.0
 
 [unsloth/Qwen3.8-27B-MTP-GGUF-32K]
-hf-repo = unsloth/Qwen3.8-27B-GGUF
-hf-file = Qwen3.8-27B-UD-Q4_K_XL.gguf
+hf = unsloth/Qwen3.8-27B-GGUF:Q4_K_XL
 ctx-size = 32768
 spec-type = draft-mtp
 spec-draft-n-max = 4
@@ -367,8 +252,7 @@ presence-penalty = 0.0
 repeat-penalty = 1.0
 
 [unsloth/Qwen3.8-27B-MTP-GGUF-32K-noreasoning]
-hf-repo = unsloth/Qwen3.8-27B-GGUF
-hf-file = Qwen3.8-27B-UD-Q4_K_XL.gguf
+hf = unsloth/Qwen3.8-27B-GGUF:Q4_K_XL
 ctx-size = 32768
 spec-type = draft-mtp
 spec-draft-n-max = 4
@@ -381,8 +265,7 @@ presence-penalty = 1.5
 repeat-penalty = 1.0
 
 [unsloth/Qwen3.6-35B-A3B-MTP-GGUF-64K]
-hf-repo = unsloth/Qwen3.6-35B-A3B-MTP-GGUF
-hf-file = Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+hf = unsloth/Qwen3.6-35B-A3B-MTP-GGUF:Q4_K_XL
 ctx-size = 65536
 spec-type = draft-mtp
 spec-draft-n-max = 2
@@ -394,8 +277,7 @@ presence-penalty = 1.5
 repeat-penalty = 1.0
 
 [unsloth/Qwen3.6-35B-A3B-MTP-GGUF-32K]
-hf-repo = unsloth/Qwen3.6-35B-A3B-MTP-GGUF
-hf-file = Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+hf = unsloth/Qwen3.6-35B-A3B-MTP-GGUF:Q4_K_XL
 ctx-size = 32768
 spec-type = draft-mtp
 spec-draft-n-max = 2
@@ -412,7 +294,7 @@ MODELS_EOF
 install_preset_files() {
   if [[ -z "$API_KEY" ]]; then
     API_KEY="$(generate_api_key)"
-    info "generated a random API key"
+    info "generated a random API key (sk-... format)"
   fi
 
   mkdir -p "$(dirname "$LLAMA_QWEN_DEST")" "$(dirname "$MODELS_INI_DEST")"
@@ -439,6 +321,8 @@ print_summary() {
   echo "  preset     : $MODELS_INI_DEST"
   if [[ -n "$LLAMA_SERVER_BIN" ]]; then
     echo "  server     : $LLAMA_SERVER_BIN"
+  else
+    echo "  server     : NOT INSTALLED (see instructions above)"
   fi
   echo "  port       : $PORT"
   echo "  api-key    : $API_KEY"
@@ -456,6 +340,12 @@ print_summary() {
   echo ""
   echo "Note: on the first request to a GGUF model it will be auto-downloaded"
   echo "      from Hugging Face (check disk space; size depends on the model, see preset: ${MODELS_INI_DEST})."
+  if [[ -z "$LLAMA_SERVER_BIN" ]]; then
+    echo ""
+    echo "llama-server is missing. Build llama.cpp for your hardware following:"
+    echo "  ${LLAMA_CPP_REPO_URL}"
+    echo "  ${LLAMA_CPP_BUILD_DOC_URL}"
+  fi
   echo "============================================="
 }
 
@@ -469,7 +359,7 @@ main() {
   echo "============================================="
   echo ""
 
-  # 1) llama.cpp
+  # 1) llama.cpp presence check (no automatic build)
   if (( SKIP_LLCPP )); then
     info "llama.cpp check skipped (--skip-llama-cpp)"
   else
