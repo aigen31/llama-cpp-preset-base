@@ -21,13 +21,13 @@ It sets up three things:
 The installer is self-contained (file templates are embedded inside), so you only need one command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<USER>/llama-preset-base/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/aigen31/llama-cpp-preset-base/main/install.sh | bash
 ```
 
 With options (pass arguments after `--`):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<USER>/llama-preset-base/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/aigen31/llama-cpp-preset-base/main/install.sh \
   | bash -s -- --port 9200 --api-key "sk-my-secret-key"
 ```
 
@@ -176,13 +176,13 @@ rm -f  ~/.local/bin/llama-cli ~/.local/bin/llama-server
 Установщик самодостаточен (шаблоны файлов встроены внутрь), поэтому нужна одна команда:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<USER>/llama-preset-base/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/aigen31/llama-cpp-preset-base/main/install.sh | bash
 ```
 
 С параметрами (аргументы передаются после `--`):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<USER>/llama-preset-base/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/aigen31/llama-cpp-preset-base/main/install.sh \
   | bash -s -- --port 9200 --api-key "sk-my-secret-key"
 ```
 
@@ -331,13 +331,13 @@ rm -f  ~/.local/bin/llama-cli ~/.local/bin/llama-server
 安装器是自包含的（文件模板内嵌其中），只需一条命令：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<USER>/llama-preset-base/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/aigen31/llama-cpp-preset-base/main/install.sh | bash
 ```
 
 带参数（参数写在 `--` 之后）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<USER>/llama-preset-base/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/aigen31/llama-cpp-preset-base/main/install.sh \
   | bash -s -- --port 9200 --api-key "sk-my-secret-key"
 ```
 

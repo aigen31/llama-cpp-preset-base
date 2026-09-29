@@ -3,6 +3,9 @@
 ## Repository purpose
 
 `llama-preset-base` is an installer for a local LLM server with a Qwen model preset.
+The GitHub repository is `aigen31/llama-cpp-preset-base` (note: repo name differs from the
+project name — always use the repo name in URLs). The canonical install URL is
+`https://raw.githubusercontent.com/aigen31/llama-cpp-preset-base/main/install.sh`.
 The sole executable artifact is **`install.sh`**, which the user downloads via `curl`
 from GitHub and runs (`curl -fsSL <url>/install.sh | bash`).
 Other files (`README.md`, `AGENT.md`) are documentation only.
@@ -82,7 +85,11 @@ not separate files.
    Verify: it prints the repository link and per-hardware backend hints, does NOT invoke
    git/cmake, exits 0, and still writes launcher + preset.
 5. **Idempotency**: second run in same `HOME` → files backed up.
-6. `grep -n 'USER' install.sh README.md` — README should retain `<USER>` placeholder; `install.sh` should have no hardcoded user repo links.
+6. **Install URL check**: `grep -rn '<USER>' README.md install.sh` — must return nothing.
+   The canonical install URL is
+   `https://raw.githubusercontent.com/aigen31/llama-cpp-preset-base/main/install.sh`.
+   It must appear verbatim in all three README language sections and in the `install.sh`
+   usage comments. No placeholders, no short repo name (`llama-preset-base`) in URLs.
 7. After tests, remove sandboxes: `rm -rf /tmp/lpb-test*`.
 
 ## Do not

@@ -13,7 +13,7 @@
 #      (INI configuration for the router mode).
 #
 # Quick install (self-contained, templates are embedded):
-#   curl -fsSL https://raw.githubusercontent.com/<USER>/llama-preset-base/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/aigen31/llama-cpp-preset-base/main/install.sh | bash
 #
 # With options:
 #   curl -fsSL <url>/install.sh | bash -s -- --port 9200 --api-key "mykey"
@@ -54,7 +54,7 @@ usage() {
 llama-preset-base — Qwen preset installer for llama.cpp
 
 Quick install:
-  curl -fsSL https://raw.githubusercontent.com/<USER>/llama-preset-base/main/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/aigen31/llama-cpp-preset-base/main/install.sh | bash
 
 With options:
   curl -fsSL <url>/install.sh | bash -s -- [options]
